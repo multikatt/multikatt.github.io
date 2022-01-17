@@ -503,9 +503,8 @@ class Game {
         this.canvas = document.getElementById("Game");
         this.ctx = this.canvas.getContext("2d");
         this.prev_time = 0;
-        this.border_blocks = [];
-        this.create_border(this.size.w, this.size.h);
         this.board = new _boardDefault.default();
+        this.create_border(this.size.w, this.size.h);
     }
     start() {
         window.requestAnimationFrame(this.update);
@@ -517,10 +516,10 @@ class Game {
     }
     create_border(width, height) {
         for(let ix = 0; ix < width; ix++){
-            for(let iy = 0; iy < height; iy++)if (iy == 0 || iy == height - 1 || ix == 0 || ix == width - 1) this.border_blocks.push(new _blockDefault.default({
+            for(let iy = 0; iy < height; iy++)if (iy == 0 || iy == height - 1 || ix == 0 || ix == width - 1) this.board.occupied_blocks.push(new _blockDefault.default({
                 x: ix,
                 y: iy
-            }, "grey"));
+            }, "grey", true));
         }
     }
     contains_full_rows() {
@@ -537,7 +536,7 @@ class Game {
             // count number of other blocks
             let current_row = this.board.occupied_blocks.filter((bb)=>bb.pos.y == block.pos.y
             );
-            let full_row = current_t.length + current_row.length == this.size.w - 2;
+            let full_row = current_t.length + current_row.length == this.size.w;
             if (full_row) full_rows.push(block.pos.y);
         });
         if (full_rows.length > 0) {
@@ -545,11 +544,12 @@ class Game {
             this.board.add_to_occupied_blocks(this.board.active_tetromino);
             // filter out full rows
             full_rows.forEach((r)=>{
-                this.board.occupied_blocks = this.board.occupied_blocks.filter((b)=>b.pos.y != r
+                this.board.occupied_blocks = this.board.occupied_blocks.filter((b)=>b.pos.y != r || b.border_block == true
                 );
-                this.board.occupied_blocks.filter((b)=>b.pos.y < r
-                ).forEach((b)=>b.pos.y += 1
-                );
+                this.board.occupied_blocks.filter((b)=>b.pos.y < r && b.border_block == false
+                ).forEach((b)=>{
+                    b.pos.y += 1;
+                });
             });
             return true;
         }
@@ -559,18 +559,12 @@ class Game {
         let current_t = this.board.active_tetromino;
         let can_move = true;
         let can_move_down = (blockpos)=>{
-            if (blockpos.y >= this.size.h - 2) can_move = false;
-            else this.board.occupied_blocks.forEach((b)=>{
+            this.board.occupied_blocks.forEach((b)=>{
                 if (b.pos.x == blockpos.x && b.pos.y == blockpos.y + 1) can_move = false;
             });
             return can_move;
         };
         let can_move_sideways = (blockpos, dir)=>{
-            if (dir == "left") {
-                if (blockpos.x <= 1) can_move = false;
-            } else if (dir == "right") {
-                if (blockpos.x >= this.size.w - 2) can_move = false;
-            }
             this.board.occupied_blocks.forEach((b)=>{
                 if (dir == "left") {
                     if (b.pos.y == blockpos.y && b.pos.x == blockpos.x - 1) can_move = false;
@@ -597,8 +591,6 @@ class Game {
     }
     draw_game() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.border_blocks.forEach((b)=>this.draw_block(b)
-        );
         this.draw_tetrominos();
     }
     draw_tetrominos() {
@@ -624,7 +616,12 @@ class Game {
                     break;
                 case "Space":
                 case "ArrowUp":
-                    this.board.active_tetromino.rotate("right");
+                case "KeyX":
+                    this.board.active_tetromino.rotate("right", this.board.occupied_blocks);
+                    this.draw_game();
+                    break;
+                case "KeyZ":
+                    this.board.active_tetromino.rotate("left", this.board.occupied_blocks);
                     this.draw_game();
                     break;
                 case "ArrowDown":
@@ -645,8 +642,7 @@ parcelHelpers.export(exports, "default", ()=>Tetromino
 );
 var _block = require("./Block");
 var _blockDefault = parcelHelpers.interopDefault(_block);
-var _shapes = require("./Shapes");
-var _shapesDefault = parcelHelpers.interopDefault(_shapes);
+var _tetrominoData = require("./Tetromino_data");
 class Tetromino {
     get_random_tetro() {
         let shapes = [
@@ -661,11 +657,13 @@ class Tetromino {
         return shapes[Math.floor(Math.random() * shapes.length)];
     }
     constructor(type){
+        this.rotation_state = 0;
         this.pos_x = 4;
         this.pos_y = 1;
         if (!type) type = this.get_random_tetro();
-        this.shape = _shapesDefault.default[type].shape;
-        this.color = _shapesDefault.default[type].color;
+        this.shape = _tetrominoData.shape_data[type].shape;
+        this.color = _tetrominoData.shape_data[type].color;
+        this.type = type;
     }
     update_tetromino() {
         this.blocks = [];
@@ -684,28 +682,72 @@ class Tetromino {
         if (dir == "down") this.pos_y += 1;
         this.update_tetromino();
     }
-    rotate(dir = "right") {
-        if (dir == "left") this.shape = this.shape.map((_x, i, s)=>s.map((y)=>y[i]
-            )
-        ).reverse();
-        if (dir == "right") this.shape = this.shape.reverse().map((_x, i, s)=>s.map((_y)=>_y[i]
-            )
-        );
+    rotate(dir = "right", occupied_blocks) {
+        let check_collision = (wanted_state, tmp_shape)=>{
+            let found_solution = null;
+            let testtype;
+            if (this.type == "I") testtype = "I";
+            else testtype = "nonI";
+            _tetrominoData.rotation_tests[testtype][this.rotation_state][wanted_state].some((rot)=>{
+                let found_hit = false;
+                tmp_shape.forEach((row, irow)=>{
+                    row.forEach((block, iblock)=>{
+                        if (block === 1) {
+                            let blockpos = {
+                                x: iblock + this.pos_x,
+                                y: irow + this.pos_y
+                            };
+                            if (occupied_blocks.find((b)=>b.pos.x == blockpos.x + rot[0] && b.pos.y == blockpos.y + rot[1]
+                            ) != null) found_hit = true;
+                        }
+                    });
+                });
+                if (found_hit == false) {
+                    found_solution = rot;
+                    return true;
+                }
+            });
+            if (found_solution) return found_solution;
+            else return false;
+        };
+        let wanted_state;
+        let tmp_shape;
+        if (dir == "left") {
+            wanted_state = (this.rotation_state + 3) % 4;
+            tmp_shape = this.shape.map((_x, i, s)=>s.map((y)=>y[i]
+                )
+            ).reverse();
+        }
+        if (dir == "right") {
+            wanted_state = (this.rotation_state + 1) % 4;
+            tmp_shape = this.shape.reverse().map((_x, i, s)=>s.map((_y)=>_y[i]
+                )
+            );
+        }
+        let found_solution = check_collision(wanted_state, tmp_shape);
+        if (found_solution != false) {
+            this.pos_x += found_solution[0];
+            this.pos_y += found_solution[1];
+            this.shape = tmp_shape;
+            this.rotation_state = wanted_state;
+        }
         this.update_tetromino();
     }
 }
 
-},{"./Block":"gB0Hc","@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV","./Shapes":"j5pJR"}],"gB0Hc":[function(require,module,exports) {
+},{"./Block":"gB0Hc","@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV","./Tetromino_data":"bGFcM"}],"gB0Hc":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
 parcelHelpers.export(exports, "default", ()=>Block
 );
 class Block {
-    constructor(pos, color){
+    constructor(pos, color, border_block){
         this.pos = pos;
         this.color = color;
+        this.border_block = false;
         this.size = 20;
         this.margin = 2;
+        if (border_block) this.border_block = border_block;
     }
 }
 
@@ -739,10 +781,388 @@ exports.export = function(dest, destName, get) {
     });
 };
 
-},{}],"j5pJR":[function(require,module,exports) {
+},{}],"bGFcM":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
-let shapes = {
+parcelHelpers.export(exports, "rotation_tests", ()=>rotation_tests
+);
+parcelHelpers.export(exports, "shape_data", ()=>shape_data
+);
+let rotation_tests = {
+    nonI: {
+        0: {
+            1: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    -1,
+                    -1
+                ],
+                [
+                    0,
+                    2
+                ],
+                [
+                    -1,
+                    2
+                ], 
+            ],
+            3: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    1,
+                    -1
+                ],
+                [
+                    0,
+                    2
+                ],
+                [
+                    1,
+                    2
+                ], 
+            ]
+        },
+        1: {
+            0: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    1,
+                    1
+                ],
+                [
+                    0,
+                    -2
+                ],
+                [
+                    1,
+                    -2
+                ], 
+            ],
+            2: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    1,
+                    1
+                ],
+                [
+                    0,
+                    -2
+                ],
+                [
+                    1,
+                    -2
+                ], 
+            ]
+        },
+        2: {
+            1: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    -1,
+                    -1
+                ],
+                [
+                    0,
+                    2
+                ],
+                [
+                    -1,
+                    2
+                ], 
+            ],
+            3: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    1,
+                    -1
+                ],
+                [
+                    0,
+                    2
+                ],
+                [
+                    1,
+                    2
+                ], 
+            ]
+        },
+        3: {
+            2: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    -1,
+                    1
+                ],
+                [
+                    0,
+                    -2
+                ],
+                [
+                    -1,
+                    -2
+                ], 
+            ],
+            0: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    -1,
+                    1
+                ],
+                [
+                    0,
+                    -2
+                ],
+                [
+                    -1,
+                    -2
+                ], 
+            ]
+        }
+    },
+    I: {
+        0: {
+            1: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -2,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    -2,
+                    -1
+                ],
+                [
+                    1,
+                    -2
+                ], 
+            ],
+            3: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    2,
+                    0
+                ],
+                [
+                    -1,
+                    -2
+                ],
+                [
+                    2,
+                    1
+                ], 
+            ]
+        },
+        1: {
+            0: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    2,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    2,
+                    -1
+                ],
+                [
+                    -1,
+                    2
+                ], 
+            ],
+            2: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    2,
+                    0
+                ],
+                [
+                    -1,
+                    2
+                ],
+                [
+                    2,
+                    1
+                ], 
+            ]
+        },
+        2: {
+            1: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    -2,
+                    0
+                ],
+                [
+                    1,
+                    2
+                ],
+                [
+                    -2,
+                    -1
+                ], 
+            ],
+            3: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    2,
+                    0
+                ],
+                [
+                    -1,
+                    0
+                ],
+                [
+                    2,
+                    -1
+                ],
+                [
+                    -1,
+                    2
+                ], 
+            ]
+        },
+        3: {
+            2: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    -2,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    -2,
+                    1
+                ],
+                [
+                    1,
+                    -2
+                ], 
+            ],
+            0: [
+                [
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    0
+                ],
+                [
+                    -2,
+                    0
+                ],
+                [
+                    1,
+                    2
+                ],
+                [
+                    -2,
+                    -1
+                ], 
+            ]
+        }
+    }
+};
+let shape_data = {
     I: {
         shape: [
             [
@@ -901,7 +1321,6 @@ let shapes = {
         color: "#E83B40"
     }
 };
-exports.default = shapes;
 
 },{"@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV"}],"96NbG":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
