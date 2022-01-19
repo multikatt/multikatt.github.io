@@ -478,7 +478,10 @@ var _tetromino = require("./Tetromino");
 var _tetrominoDefault = parcelHelpers.interopDefault(_tetromino);
 class Game {
     constructor(){
-        this.speed = 250;
+        this.prev_time = 0;
+        this.score = 0;
+        this.level = 0;
+        this.total_rows_cleared = 0;
         this.size = {
             w: 12,
             h: 22
@@ -492,27 +495,41 @@ class Game {
                 else if (this.board.active_tetromino.pos_y === 1) this.game_state = "stopped";
                 else {
                     if (!this.contains_full_rows()) this.board.add_to_occupied_blocks(this.board.active_tetromino);
-                    const tetro = new _tetrominoDefault.default();
-                    tetro.update_tetromino();
-                    this.board.active_tetromino = tetro;
+                    this.spawn_tetromino();
                 }
+                // Fixed-goal leveling:
+                this.level = Math.floor(this.total_rows_cleared / 10);
+                this.set_speed();
                 this.draw_game();
             }
             if (this.game_state === "running") window.requestAnimationFrame(this.update);
         };
+        this.set_speed();
         this.canvas = document.getElementById("Game");
         this.ctx = this.canvas.getContext("2d");
-        this.prev_time = 0;
         this.board = new _boardDefault.default();
         this.create_border(this.size.w, this.size.h);
     }
     start() {
         window.requestAnimationFrame(this.update);
-        const tetro = new _tetrominoDefault.default();
-        tetro.update_tetromino();
-        this.board.active_tetromino = tetro;
+        this.spawn_tetromino();
         this.draw_game();
         this.input();
+    }
+    spawn_tetromino() {
+        this.board.active_tetromino = this.board.next_tetromino === undefined ? new _tetrominoDefault.default() : this.board.next_tetromino;
+        this.board.next_tetromino = new _tetrominoDefault.default();
+        if (this.board.next_tetromino.type == "O") this.board.next_tetromino.pos_x = 15;
+        else if (this.board.next_tetromino.type == "I") this.board.next_tetromino.pos_x = 14;
+        else this.board.next_tetromino.pos_x = 14.5;
+        this.board.next_tetromino.update_tetromino();
+        this.board.active_tetromino.pos_x = 4;
+        this.board.active_tetromino.update_tetromino();
+    }
+    set_speed() {
+        // From formula on https://harddrop.com/wiki/Tetris_Worlds
+        // (0.8-((Level-1)*0.007))^(Level-1)
+        this.speed = Math.pow(0.8 - this.level * 0.007, this.level) * 1000;
     }
     create_border(width, height) {
         for(let ix = 0; ix < width; ix++){
@@ -551,6 +568,15 @@ class Game {
                     b.pos.y += 1;
                 });
             });
+            // Using original Nintendo scoring system
+            let score_per_line = [
+                40,
+                100,
+                300,
+                1200
+            ];
+            this.score += score_per_line[full_rows.length - 1] * (this.level + 1);
+            this.total_rows_cleared += full_rows.length;
             return true;
         }
         return false;
@@ -592,11 +618,17 @@ class Game {
     draw_game() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this.draw_tetrominos();
+        let score_el = document.getElementById("Score");
+        score_el.innerHTML = this.score.toString();
+        let level_el = document.getElementById("Level");
+        level_el.innerHTML = this.level.toString();
     }
     draw_tetrominos() {
         this.board.active_tetromino.blocks.forEach((b)=>this.draw_block(b)
         );
         this.board.occupied_blocks.forEach((b)=>this.draw_block(b)
+        );
+        this.board.next_tetromino.blocks.forEach((b)=>this.draw_block(b)
         );
     }
     draw_block(block) {
@@ -635,107 +667,7 @@ class Game {
     }
 }
 
-},{"./Tetromino":"g3Xvv","./Block":"gB0Hc","@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV","./Board":"96NbG"}],"g3Xvv":[function(require,module,exports) {
-var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
-parcelHelpers.defineInteropFlag(exports);
-parcelHelpers.export(exports, "default", ()=>Tetromino
-);
-var _block = require("./Block");
-var _blockDefault = parcelHelpers.interopDefault(_block);
-var _tetrominoData = require("./Tetromino_data");
-class Tetromino {
-    get_random_tetro() {
-        let shapes = [
-            "I",
-            "J",
-            "L",
-            "O",
-            "S",
-            "T",
-            "Z"
-        ];
-        return shapes[Math.floor(Math.random() * shapes.length)];
-    }
-    constructor(type){
-        this.rotation_state = 0;
-        this.pos_x = 4;
-        this.pos_y = 1;
-        if (!type) type = this.get_random_tetro();
-        this.shape = _tetrominoData.shape_data[type].shape;
-        this.color = _tetrominoData.shape_data[type].color;
-        this.type = type;
-    }
-    update_tetromino() {
-        this.blocks = [];
-        this.shape.forEach((row, irow)=>{
-            row.forEach((col, icol)=>{
-                if (col === 1) this.blocks.push(new _blockDefault.default({
-                    x: this.pos_x + icol,
-                    y: this.pos_y + irow
-                }, this.color));
-            });
-        });
-    }
-    move(dir) {
-        if (dir == "left") this.pos_x -= 1;
-        if (dir == "right") this.pos_x += 1;
-        if (dir == "down") this.pos_y += 1;
-        this.update_tetromino();
-    }
-    rotate(dir = "right", occupied_blocks) {
-        let check_collision = (wanted_state, tmp_shape)=>{
-            let found_solution = null;
-            let testtype;
-            if (this.type == "I") testtype = "I";
-            else testtype = "nonI";
-            _tetrominoData.rotation_tests[testtype][this.rotation_state][wanted_state].some((rot)=>{
-                let found_hit = false;
-                tmp_shape.forEach((row, irow)=>{
-                    row.forEach((block, iblock)=>{
-                        if (block === 1) {
-                            let blockpos = {
-                                x: iblock + this.pos_x,
-                                y: irow + this.pos_y
-                            };
-                            if (occupied_blocks.find((b)=>b.pos.x == blockpos.x + rot[0] && b.pos.y == blockpos.y + rot[1]
-                            ) != null) found_hit = true;
-                        }
-                    });
-                });
-                if (found_hit == false) {
-                    found_solution = rot;
-                    return true;
-                }
-            });
-            if (found_solution) return found_solution;
-            else return false;
-        };
-        let wanted_state;
-        let tmp_shape;
-        if (dir == "left") {
-            wanted_state = (this.rotation_state + 3) % 4;
-            tmp_shape = this.shape.map((_x, i, s)=>s.map((y)=>y[i]
-                )
-            ).reverse();
-        }
-        if (dir == "right") {
-            wanted_state = (this.rotation_state + 1) % 4;
-            tmp_shape = this.shape.reverse().map((_x, i, s)=>s.map((_y)=>_y[i]
-                )
-            );
-        }
-        let found_solution = check_collision(wanted_state, tmp_shape);
-        if (found_solution != false) {
-            this.pos_x += found_solution[0];
-            this.pos_y += found_solution[1];
-            this.shape = tmp_shape;
-            this.rotation_state = wanted_state;
-        }
-        this.update_tetromino();
-    }
-}
-
-},{"./Block":"gB0Hc","@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV","./Tetromino_data":"bGFcM"}],"gB0Hc":[function(require,module,exports) {
+},{"./Block":"gB0Hc","./Board":"96NbG","./Tetromino":"g3Xvv","@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV"}],"gB0Hc":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
 parcelHelpers.export(exports, "default", ()=>Block
@@ -781,14 +713,134 @@ exports.export = function(dest, destName, get) {
     });
 };
 
-},{}],"bGFcM":[function(require,module,exports) {
+},{}],"96NbG":[function(require,module,exports) {
+var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
+parcelHelpers.defineInteropFlag(exports);
+parcelHelpers.export(exports, "default", ()=>Board
+);
+class Board {
+    constructor(occupied_blocks = []){
+        this.occupied_blocks = occupied_blocks;
+    }
+    add_to_occupied_blocks(tetro) {
+        tetro.blocks.forEach((block)=>{
+            this.occupied_blocks.push(block);
+        });
+    }
+}
+
+},{"@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV"}],"g3Xvv":[function(require,module,exports) {
+var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
+parcelHelpers.defineInteropFlag(exports);
+parcelHelpers.export(exports, "default", ()=>Tetromino
+);
+var _block = require("./Block");
+var _blockDefault = parcelHelpers.interopDefault(_block);
+var _tetrominoData = require("./Tetromino_data");
+class Tetromino {
+    get_random_tetro() {
+        let shapes = [
+            "I",
+            "J",
+            "L",
+            "O",
+            "S",
+            "T",
+            "Z"
+        ];
+        return shapes[Math.floor(Math.random() * shapes.length)];
+    }
+    constructor(type){
+        this.rotation_state = 0;
+        this.pos_x = 4;
+        this.pos_y = 1;
+        if (!type) type = this.get_random_tetro();
+        this.blocks = [];
+        this.shape = [
+            ..._tetrominoData.shape_data[type].shape
+        ];
+        this.color = _tetrominoData.shape_data[type].color;
+        this.type = type;
+    }
+    update_tetromino() {
+        this.blocks = [];
+        this.shape.forEach((row, irow)=>{
+            row.forEach((col, icol)=>{
+                if (col === 1) this.blocks.push(new _blockDefault.default({
+                    x: this.pos_x + icol,
+                    y: this.pos_y + irow
+                }, this.color));
+            });
+        });
+    }
+    move(dir) {
+        if (dir == "left") this.pos_x -= 1;
+        if (dir == "right") this.pos_x += 1;
+        if (dir == "down") this.pos_y += 1;
+        this.update_tetromino();
+    }
+    rotate(dir = "right", occupied_blocks) {
+        let check_collision = (wanted_state, tmp_shape)=>{
+            let found_solution = false;
+            let testtype;
+            if (this.type == "I") testtype = "I";
+            else testtype = "nonI";
+            _tetrominoData.rotation_tests[testtype][this.rotation_state][wanted_state].some((rot)=>{
+                let found_hit = false;
+                tmp_shape.forEach((row, irow)=>{
+                    row.forEach((block, iblock)=>{
+                        if (block === 1) {
+                            let blockpos = {
+                                x: iblock + this.pos_x,
+                                y: irow + this.pos_y
+                            };
+                            if (occupied_blocks) {
+                                if (occupied_blocks.find((b)=>b.pos.x == blockpos.x + rot[0] && b.pos.y == blockpos.y + rot[1]
+                                ) != null) found_hit = true;
+                            }
+                        }
+                    });
+                });
+                if (found_hit == false) {
+                    found_solution = rot;
+                    return true;
+                }
+            });
+            if (found_solution) return found_solution;
+            else return false;
+        };
+        let wanted_state;
+        let tmp_shape;
+        if (dir == "left") {
+            wanted_state = (this.rotation_state + 3) % 4;
+            tmp_shape = this.shape.map((_x, i, s)=>s.map((y)=>y[i]
+                )
+            ).reverse();
+        } else {
+            wanted_state = (this.rotation_state + 1) % 4;
+            tmp_shape = this.shape.reverse().map((_x, i, s)=>s.map((_y)=>_y[i]
+                )
+            );
+        }
+        let found_solution = check_collision(wanted_state, tmp_shape);
+        if (found_solution != false && Array.isArray(found_solution)) {
+            this.pos_x += found_solution[0];
+            this.pos_y += found_solution[1];
+            this.shape = tmp_shape;
+            this.rotation_state = wanted_state;
+        }
+        this.update_tetromino();
+    }
+}
+
+},{"./Block":"gB0Hc","./Tetromino_data":"bGFcM","@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV"}],"bGFcM":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
 parcelHelpers.export(exports, "rotation_tests", ()=>rotation_tests
 );
 parcelHelpers.export(exports, "shape_data", ()=>shape_data
 );
-let rotation_tests = {
+const rotation_tests = {
     nonI: {
         0: {
             1: [
@@ -1162,7 +1214,7 @@ let rotation_tests = {
         }
     }
 };
-let shape_data = {
+const shape_data = {
     I: {
         shape: [
             [
@@ -1321,22 +1373,6 @@ let shape_data = {
         color: "#E83B40"
     }
 };
-
-},{"@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV"}],"96NbG":[function(require,module,exports) {
-var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
-parcelHelpers.defineInteropFlag(exports);
-parcelHelpers.export(exports, "default", ()=>Board
-);
-class Board {
-    constructor(occupied_blocks = []){
-        this.occupied_blocks = occupied_blocks;
-    }
-    add_to_occupied_blocks(tetro) {
-        tetro.blocks.forEach((block)=>{
-            this.occupied_blocks.push(block);
-        });
-    }
-}
 
 },{"@parcel/transformer-js/src/esmodule-helpers.js":"ciiiV"}]},["af9k4","kNdr8"], "kNdr8", "parcelRequire685b")
 
