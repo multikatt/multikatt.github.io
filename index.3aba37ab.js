@@ -500,7 +500,7 @@ class Game {
                 // Fixed-goal leveling:
                 this.level = Math.floor(this.total_rows_cleared / 10);
                 this.set_speed();
-                this.draw_game();
+                if (this.game_state === "running") this.draw_game();
             }
             if (this.game_state === "running") window.requestAnimationFrame(this.update);
         };
@@ -584,21 +584,22 @@ class Game {
     check_collision(dir) {
         let current_t = this.board.active_tetromino;
         let can_move = true;
-        let can_move_down = (blockpos)=>{
-            this.board.occupied_blocks.forEach((b)=>{
-                if (b.pos.x == blockpos.x && b.pos.y == blockpos.y + 1) can_move = false;
-            });
-            return can_move;
-        };
-        let can_move_sideways = (blockpos, dir)=>{
-            this.board.occupied_blocks.forEach((b)=>{
-                if (dir == "left") {
-                    if (b.pos.y == blockpos.y && b.pos.x == blockpos.x - 1) can_move = false;
-                } else if (dir == "right") {
-                    if (b.pos.y == blockpos.y && b.pos.x == blockpos.x + 1) can_move = false;
+        const find_collision = (blockpos, dir)=>{
+            let found_hit = false;
+            this.board.occupied_blocks.some((b)=>{
+                switch(dir){
+                    case "left":
+                        if (b.pos.y == blockpos.y && b.pos.x == blockpos.x - 1) found_hit = true;
+                        break;
+                    case "right":
+                        if (b.pos.y == blockpos.y && b.pos.x == blockpos.x + 1) found_hit = true;
+                        break;
+                    case "down":
+                        if (b.pos.x == blockpos.x && b.pos.y == blockpos.y + 1) found_hit = true;
+                        break;
                 }
             });
-            return can_move;
+            return found_hit;
         };
         current_t.shape.forEach((row, irow)=>{
             row.forEach((block, iblock)=>{
@@ -607,9 +608,9 @@ class Game {
                         x: iblock + current_t.pos_x,
                         y: irow + current_t.pos_y
                     };
-                    if (dir == "left" && !can_move_sideways(blockpos, "left")) can_move = false;
-                    else if (dir == "right" && !can_move_sideways(blockpos, "right")) can_move = false;
-                    else if (dir == "down" && !can_move_down(blockpos)) can_move = false;
+                    if (dir == "left" && find_collision(blockpos, "left")) can_move = false;
+                    else if (dir == "right" && find_collision(blockpos, "right")) can_move = false;
+                    else if (dir == "down" && find_collision(blockpos, "down")) can_move = false;
                 }
             });
         });
@@ -636,34 +637,39 @@ class Game {
         this.ctx.fillRect(block.pos.x * (block.size + block.margin), block.pos.y * (block.size + block.margin), block.size, block.size);
     }
     input() {
-        window.addEventListener("keyup", (key)=>{
-            if (this.game_state == "running") switch(key.code){
-                case "ArrowLeft":
+        let pressed_key = {
+        };
+        let keydown = (key)=>{
+            pressed_key[key.code] = true;
+        };
+        let keyup = (key)=>{
+            pressed_key[key.code] = false;
+        };
+        let handleKeys = ()=>{
+            if (Object.keys(pressed_key).length > 0 && this.game_state === "running") {
+                if (pressed_key["ArrowLeft"]) {
                     if (this.check_collision("left")) this.board.active_tetromino.move("left");
-                    this.draw_game();
-                    break;
-                case "ArrowRight":
+                }
+                if (pressed_key["ArrowRight"]) {
                     if (this.check_collision("right")) this.board.active_tetromino.move("right");
-                    this.draw_game();
-                    break;
-                case "Space":
-                case "ArrowUp":
-                case "KeyX":
-                    this.board.active_tetromino.rotate("right", this.board.occupied_blocks);
-                    this.draw_game();
-                    break;
-                case "KeyZ":
-                    this.board.active_tetromino.rotate("left", this.board.occupied_blocks);
-                    this.draw_game();
-                    break;
-                case "ArrowDown":
-                    while(this.check_collision("down"))this.board.active_tetromino.move("down");
-                    this.draw_game();
-                    break;
-                default:
-                    break;
+                }
+                if (pressed_key["ArrowDown"]) {
+                    if (this.check_collision("down")) this.board.active_tetromino.move("down");
+                }
             }
+            this.draw_game();
+        };
+        window.addEventListener("keydown", (key)=>{
+            if (this.game_state == "running") {
+                if (key.code === "ArrowUp" || key.code === "KeyX") this.board.active_tetromino.rotate("right", this.board.occupied_blocks);
+                if (key.code === "KeyZ") this.board.active_tetromino.rotate("left", this.board.occupied_blocks);
+                if (key.code === "Space" && key.repeat === false) while(this.check_collision("down"))this.board.active_tetromino.move("down");
+            }
+            this.draw_game();
         });
+        window.addEventListener("keydown", keydown);
+        window.addEventListener("keyup", keyup);
+        window.setInterval(handleKeys, 75);
     }
 }
 
